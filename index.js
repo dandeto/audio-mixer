@@ -11,7 +11,57 @@
 		-EFFECTS
 
 		-AUDIO DESTINATION
-	*************************************************************************/
+*************************************************************************/
+
+//custom effects (break out into seperate file if I make more)
+
+function echo (ctx, input, output) { //could make this a class but...
+	/******************************************************************
+		input -> output
+		input -> delay (plays audio again after delay)
+		delay -> feedback (gain)
+		delay <- feedback
+		delay -> wet (gain)
+		wet -> output
+
+		in ----------------------- out
+		|							|
+	  delay ---------------------- wet
+	   | |
+	feedback
+
+	******************************************************************/
+
+	this.input = input;
+	this.on = false;
+	this.output = output;
+	this.delay = ctx.createDelay();
+	this.feedback = ctx.createGain();
+	this.wet = ctx.createGain();
+
+	this.feedback.gain.value = .25; //these should be const I think
+	this.wet.gain.value = .25;
+	this.delay.delayTime.value = .15; //default value - exposed so can be manipulated by user
+
+	this.input.connect(this.output); //constant line to output
+
+	this.toggle_off = function() { //disconnect the entire delay ciruit leaving a direct line to output
+		this.delay.disconnect();
+		this.feedback.disconnect();
+		this.wet.disconnect();
+	}
+
+	this.toggle_on = function() {
+		this.input.connect(this.delay); //already connected to output, now connect to delay circuit
+		this.delay.connect(this.feedback);
+		this.feedback.connect(this.delay);
+		this.delay.connect(this.wet);
+		this.wet.connect(this.output);
+	}
+}
+
+//TODO: let user load song after song however I decide to implement it.
+//after audio loads
 
 function main (fr) {
 	// AudioContext
@@ -56,9 +106,12 @@ function main (fr) {
 	hpf.connect(lpf);
 
 	//effects
+    
+    /*const convolver = ctx.createConvolver(); //no way to scale the reverb. all or nothing to apply the effect.
+        window.fetch("https://raw.githubusercontent.com/learnable-content/jamesseanwright/master/files/web-audio-series/ir.mp3").then(response => response.arrayBuffer()).then(arrayBuffer => ctx.decodeAudioData(arrayBuffer)).then(buffer => convolver.buffer = buffer);
+        convolver.connect(hpf);*/
 
-	const convolver = ctx.createConvolver(); //work on this at some point - use for reverb
-
+    
 	function makeDistortionCurve(amount) { // from MDN - not my code
 		var k = typeof amount === 'number' ? amount : 50,
 		n_samples = 44100,
@@ -75,7 +128,8 @@ function main (fr) {
 	let distortion = ctx.createWaveShaper();
 	distortion.curve = makeDistortionCurve(0);
 	distortion.oversample = '4x';
-	distortion.connect(hpf);
+
+	let delay = new echo(ctx, distortion, hpf); //connect distortion to delay and delay to hpf
 
 
 	// Controls
@@ -171,8 +225,31 @@ function main (fr) {
 	document.getElementById("h_slider").addEventListener("mousemove", function() {eq.high.gain.value = this.value}, false);
 	document.getElementById("m_slider").addEventListener("mousemove", function() {eq.mid.gain.value = this.value}, false);
 	document.getElementById("b_slider").addEventListener("mousemove", function() {eq.bass.gain.value = this.value}, false);
-	document.getElementById("f_slider").addEventListener("mousemove", function() {filter(this.value)}, false);
+	document.getElementById("f_slider").addEventListener("mousemove", function() {
+		if (this.value < -.04)
+			lpf.frequency.value = Math.log10(-1*this.value)*10000*-1; //log curve eases in with (-) #s
+		else if (this.value > .04)
+			hpf.frequency.value = Math.pow(this.value, 2)*10000; //x^2 curve eases in with (+) #s
+		else {
+			lpf.frequency.value = 22050; //turn filter off
+			hpf.frequency.value = 0;
+		}
+	}, false);
 	document.getElementById("d_slider").addEventListener("mousemove", function() {distortion.curve = makeDistortionCurve(parseInt(this.value, 10))}, false);
+	document.getElementById("delay_slider").addEventListener("mousemove", function() {
+		if (this.value < this.max && delay.on == false) {
+			delay.toggle_on();
+			delay.delay.delayTime.value = this.value;
+			delay.on = true;
+		}
+		else if (this.value < this.max) {
+			delay.delay.delayTime.value = this.value;
+		}
+		else {
+			delay.toggle_off();
+			delay.on = false;
+		}
+	}, false);
 }
 
 

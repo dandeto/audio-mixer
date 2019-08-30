@@ -1,11 +1,12 @@
 <!DOCTYPE html>
 <html>
 <head>
-	<title>filter</title>
+	<title>Mixer</title>
 	<meta charset="utf-8">
 </head>
 	<body>
-		<canvas id="c" width="750"></canvas>
+	  <canvas id="c" width="750"></canvas>
+	  <audio id="a" src="ir.mp3"></audio> <!--fast way to load for testing without xhr-->
 		<br />
 		<input id="file" type="file"/>
 		<p>Gain: </p>
@@ -22,6 +23,8 @@
 		<input id="f_slider" type="range" min="-1" max="1" step=".001"/>
 		<p>Distortion: </p>
 		<input id="d_slider" type="range" min="0" max="100" step="1"/>
+		<p>Delay:</p>
+		<input id="delay_slider" type="range" min=".1" max="2" step=".1"/>
 		
 		<script type="text/javascript" src="index.js"></script>
 	</body>
