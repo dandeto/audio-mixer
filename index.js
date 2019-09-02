@@ -1,76 +1,39 @@
 /*************************************************************************
 		--Audio Graph--
-		-MASTER (gain node)
+
+		-Audio Input
+		-Preamp
+		-FILTERS
+		 ->Lowpass
+		 ->Highpass
 		-EQUILIZERS
 		 -> High
 		 -> Mid
 		 -> Low
-		-FILTERS
-		 ->Lowpass
-		 ->Highpass
 		-EFFECTS
 
 		-AUDIO DESTINATION
 *************************************************************************/
 
-//custom effects (break out into seperate file if I make more)
-
-function echo (ctx, input, output) { //could make this a class but...
-	/******************************************************************
-		input -> output
-		input -> delay (plays audio again after delay)
-		delay -> feedback (gain)
-		delay <- feedback
-		delay -> wet (gain)
-		wet -> output
-
-		in ----------------------- out
-		|							|
-	  delay ---------------------- wet
-	   | |
-	feedback
-
-	******************************************************************/
-
-	this.input = input;
-	this.on = false;
-	this.output = output;
-	this.delay = ctx.createDelay();
-	this.feedback = ctx.createGain();
-	this.wet = ctx.createGain();
-
-	this.feedback.gain.value = .25; //these should be const I think
-	this.wet.gain.value = .25;
-	this.delay.delayTime.value = .15; //default value - exposed so can be manipulated by user
-
-	this.input.connect(this.output); //constant line to output
-
-	this.toggle_off = function() { //disconnect the entire delay ciruit leaving a direct line to output
-		this.delay.disconnect();
-		this.feedback.disconnect();
-		this.wet.disconnect();
-	}
-
-	this.toggle_on = function() {
-		this.input.connect(this.delay); //already connected to output, now connect to delay circuit
-		this.delay.connect(this.feedback);
-		this.feedback.connect(this.delay);
-		this.delay.connect(this.wet);
-		this.wet.connect(this.output);
-	}
-}
-
 //TODO: let user load song after song however I decide to implement it.
-//after audio loads
 
-function main (fr) {
-	// AudioContext
+
+function main (fr) { //after audio loads
 	//The entire AudioContext must be created after user gesture (augh)
 
-	const ctx = new AudioContext();
-	const master = ctx.createGain(); //master audio channel which doubles as gain node
-	master.gain.value = .5;
-	master.connect(ctx.destination);
+	const ctx = new AudioContext //create audio modules
+	const preamp = ctx.createGain(); //audio inputs here
+	preamp.gain.value = .5;
+
+	//standard filters
+
+	const lpf = ctx.createBiquadFilter(); //low pass filter
+	lpf.type = "lowpass";
+	lpf.frequency.value = 22050;
+
+	const hpf = ctx.createBiquadFilter(); //high pass filter
+	hpf.type = "highpass";
+	hpf.frequency.value = 0;
 
 	//eq modules
 
@@ -79,72 +42,22 @@ function main (fr) {
 	eq.high.type = "peaking";
 	eq.high.frequency.value = 6000;
 	eq.high.gain.value = 0;
-	eq.high.connect(master);
 
 	eq.mid = ctx.createBiquadFilter();
 	eq.mid.type = "peaking";
 	eq.mid.frequency.value = 1250;
 	eq.mid.gain.value = 0;
-	eq.mid.connect(eq.high);
 
 	eq.bass = ctx.createBiquadFilter();
 	eq.bass.type = "peaking";
 	eq.bass.frequency.value = 100;
 	eq.bass.gain.value = 0;
-	eq.bass.connect(eq.mid);
-
-	//standard filters
-
-	const lpf = ctx.createBiquadFilter(); //low pass filter
-	lpf.type = "lowpass";
-	lpf.frequency.value = 22050;
-	lpf.connect(eq.bass);
-
-	const hpf = ctx.createBiquadFilter(); //high pass filter
-	hpf.type = "highpass";
-	hpf.frequency.value = 0;
-	hpf.connect(lpf);
 
 	//effects
     
-    /*const convolver = ctx.createConvolver(); //no way to scale the reverb. all or nothing to apply the effect.
-        window.fetch("https://raw.githubusercontent.com/learnable-content/jamesseanwright/master/files/web-audio-series/ir.mp3").then(response => response.arrayBuffer()).then(arrayBuffer => ctx.decodeAudioData(arrayBuffer)).then(buffer => convolver.buffer = buffer);
-        convolver.connect(hpf);*/
-
-    
-	function makeDistortionCurve(amount) { // from MDN - not my code
-		var k = typeof amount === 'number' ? amount : 50,
-		n_samples = 44100,
-		curve = new Float32Array(n_samples),
-		deg = Math.PI / 180,
-		i = 0,
-		x;
-		for ( ; i < n_samples; ++i ) {
-			x = i * 2 / n_samples - 1;
-			curve[i] = ( 3 + k ) * x * 20 * deg / ( Math.PI + k * Math.abs(x) );
-		}
-		return curve;
-	}
-	let distortion = ctx.createWaveShaper();
-	distortion.curve = makeDistortionCurve(0);
-	distortion.oversample = '4x';
-
-	let delay = new echo(ctx, distortion, hpf); //connect distortion to delay and delay to hpf
-
-
-	// Controls
-
-
-	function filter(f) {
-		if (f < -.04)
-			lpf.frequency.value = Math.log10(-1*f)*10000*-1; //log curve eases in with (-) #s
-		else if (f > .04)
-			hpf.frequency.value = Math.pow(f, 2)*10000; //x^2 curve eases in with (+) #s
-		else {
-			lpf.frequency.value = 22050; //turn filter off
-			hpf.frequency.value = 0;
-		}
-	}
+	let distortion = new Distortion(ctx, eq.bass, ctx.destination);//define effect module with input and output
+	let delay = new Delay(ctx, eq.bass, ctx.destination);
+	let reverb = new Reverb(ctx, eq.bass, ctx.destination);
 
 
 	// Load audio
@@ -155,7 +68,16 @@ function main (fr) {
 
 	let audioBuffer = ctx.decodeAudioData(fr.result).then(function(buffer) {
 		audioNode.buffer = buffer;
-		audioNode.connect(distortion); //connect to lowest node on the chain - I did the whole thing backward :(
+
+		audioNode.connect(preamp); //create audio graph
+		preamp.connect(lpf);
+		lpf.connect(hpf);
+		hpf.connect(eq.high);
+		eq.high.connect(eq.mid);
+		eq.mid.connect(eq.bass);
+		eq.bass.connect(ctx.destination);
+
+
 		waveform(buffer); //display waveform
 		audioNode.start();
 		start_time = audioNode.context.currentTime;
@@ -221,7 +143,7 @@ function main (fr) {
 
 	//Event listeners
 
-	document.getElementById("slider").addEventListener("mousemove", function() {master.gain.value = this.value}, false);
+	document.getElementById("slider").addEventListener("mousemove", function() {preamp.gain.value = this.value}, false);
 	document.getElementById("h_slider").addEventListener("mousemove", function() {eq.high.gain.value = this.value}, false);
 	document.getElementById("m_slider").addEventListener("mousemove", function() {eq.mid.gain.value = this.value}, false);
 	document.getElementById("b_slider").addEventListener("mousemove", function() {eq.bass.gain.value = this.value}, false);
@@ -235,21 +157,10 @@ function main (fr) {
 			hpf.frequency.value = 0;
 		}
 	}, false);
-	document.getElementById("d_slider").addEventListener("mousemove", function() {distortion.curve = makeDistortionCurve(parseInt(this.value, 10))}, false);
-	document.getElementById("delay_slider").addEventListener("mousemove", function() {
-		if (this.value < this.max && delay.on == false) {
-			delay.toggle_on();
-			delay.delay.delayTime.value = this.value;
-			delay.on = true;
-		}
-		else if (this.value < this.max) {
-			delay.delay.delayTime.value = this.value;
-		}
-		else {
-			delay.toggle_off();
-			delay.on = false;
-		}
-	}, false);
+	document.getElementById("d_slider").addEventListener("mousemove", function() {distortion.distortion.curve = distortion.makeDistortionCurve(parseInt(this.value, 10))}, false);
+	document.getElementById("delay_balance_slider").addEventListener("mousemove", function() {delay.wet.gain.value = this.value;}, false);
+	document.getElementById("delay_time_slider").addEventListener("mousemove", function() {delay.delay.delayTime.value = this.value;}, false);
+	document.getElementById("delay_balance_slider").addEventListener("mousemove", function() {delay.feedback.gain.value = this.value;}, false);
 }
 
 
